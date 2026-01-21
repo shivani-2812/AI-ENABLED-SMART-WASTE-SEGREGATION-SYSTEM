@@ -1,33 +1,107 @@
-#define TRIG_PIN 14   // GPIO14 (D5)
-#define ECHO_PIN 12   // GPIO12 (D6)
+#include <ESP32Servo.h>
 
-long duration;
-float distance;
+// ================= PIN DEFINITIONS =================
+#define MOISTURE_PIN 34
 
-void setup() {
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  Serial.begin(9600);
+#define SERVO_PIN 13
+#define DC_IN1 27
+#define DC_IN2 26
+
+#define TRIG_WET 5
+#define ECHO_WET 18
+
+#define TRIG_DRY 19
+#define ECHO_DRY 21
+
+#define TRIG_HAZ 22
+#define ECHO_HAZ 23
+
+#define TRIG_REC 25
+#define ECHO_REC 32
+
+// ================= PARAMETERS =================
+#define MOISTURE_THRESHOLD 2200
+#define BIN_FULL_DISTANCE 8   // cm
+
+Servo gateServo;
+
+// ================= ULTRASONIC FUNCTION =================
+long readDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  return duration * 0.034 / 2;
 }
 
+// ================= DC MOTOR ROTATION =================
+void rotateToDryBin() {
+  digitalWrite(DC_IN1, HIGH);
+  digitalWrite(DC_IN2, LOW);
+  delay(900);   // adjust based on actual rotation
+  digitalWrite(DC_IN1, LOW);
+  digitalWrite(DC_IN2, LOW);
+}
+
+// ================= SETUP =================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(DC_IN1, OUTPUT);
+  pinMode(DC_IN2, OUTPUT);
+
+  pinMode(TRIG_WET, OUTPUT); pinMode(ECHO_WET, INPUT);
+  pinMode(TRIG_DRY, OUTPUT); pinMode(ECHO_DRY, INPUT);
+  pinMode(TRIG_HAZ, OUTPUT); pinMode(ECHO_HAZ, INPUT);
+  pinMode(TRIG_REC, OUTPUT); pinMode(ECHO_REC, INPUT);
+
+  gateServo.attach(SERVO_PIN);
+  gateServo.write(0);  // flap closed
+
+  Serial.println("Waste Segregation System (No AI) Started");
+}
+
+// ================= MAIN LOOP =================
 void loop() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
 
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  // --------- 1. Moisture Detection ---------
+  int moisture = analogRead(MOISTURE_PIN);
+  Serial.print("Moisture Value: ");
+  Serial.println(moisture);
 
-  duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  bool isWet = (moisture < MOISTURE_THRESHOLD);
 
-  if (duration == 0) {
-    Serial.println("Out of range");
+  // --------- 2. Bin Alignment ---------
+  if (isWet) {
+    Serial.println("Waste Type: WET");
+    // No rotation needed
   } else {
-    distance = (duration * 0.0343) / 2;
-    Serial.print("Distance: ");
-    Serial.print(distance);
-    Serial.println(" cm");
+    Serial.println("Waste Type: DRY");
+    rotateToDryBin();
   }
 
-  delay(500);
+  // --------- 3. Drop Waste ---------
+  gateServo.write(90);   // open flap
+  delay(1500);
+  gateServo.write(0);    // close flap
+
+  // --------- 4. Bin Level Monitoring ---------
+  if (readDistance(TRIG_WET, ECHO_WET) <= BIN_FULL_DISTANCE)
+    Serial.println("⚠ Wet Bin FULL");
+
+  if (readDistance(TRIG_DRY, ECHO_DRY) <= BIN_FULL_DISTANCE)
+    Serial.println("⚠ Dry Bin FULL");
+
+  if (readDistance(TRIG_HAZ, ECHO_HAZ) <= BIN_FULL_DISTANCE)
+    Serial.println("⚠ Hazardous Bin FULL");
+
+  if (readDistance(TRIG_REC, ECHO_REC) <= BIN_FULL_DISTANCE)
+    Serial.println("⚠ Recyclable Bin FULL");
+
+  delay(3000);
 }
+
+
